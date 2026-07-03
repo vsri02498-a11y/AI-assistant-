@@ -3045,6 +3045,11 @@ function createSidebarItem(chat, isActive) {
     </div>
     ${catHtml}
     ${pinHtml}
+    <button class="ci-more" title="More" aria-label="More options: ${esc(chat.title)}">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <circle cx="12" cy="5" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="12" cy="19" r="1.9"/>
+      </svg>
+    </button>
     <button class="ci-del" title="Delete chat" aria-label="Delete chat: ${esc(chat.title)}">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
         <line x1="18" y1="6" x2="6" y2="18"/>
@@ -3058,6 +3063,12 @@ function createSidebarItem(chat, isActive) {
     if (e.target.closest('.ci-del')) {
       e.stopPropagation();
       deleteChat(chat.id);
+      return;
+    }
+    if (e.target.closest('.ci-more')) {
+      e.stopPropagation();
+      const r = e.target.closest('.ci-more').getBoundingClientRect();
+      showCtxMenu(chat.id, r.right, r.bottom + 4);
       return;
     }
     switchChat(chat.id);
@@ -11261,3 +11272,69 @@ if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
 })();
 // ── END AUTH WAVE ANIMATION ───────────────────────────────────────────────────
 
+
+// ══════════════════════════════════════════════════════════════════════════
+//  GROK-STYLE SIDEBAR PATCH — top profile row, Tasks-style New Chat pill,
+//  upgrade banner, collapsible "Conversations" header, bottom search/settings
+//  /compose bar. UI-only: reuses existing app functions (openPlanModal,
+//  openSettings, setSidebarCollapsed, showWelcome, renderChatList).
+// ══════════════════════════════════════════════════════════════════════════
+(function () {
+  function ready(fn) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', fn);
+    } else {
+      fn();
+    }
+  }
+
+  ready(function () {
+    // ── Conversations collapse toggle ──────────────────────────────
+    var convHdr  = document.getElementById('sbConvHdr');
+    var listWrap = document.getElementById('sbListWrap');
+    if (convHdr && listWrap) {
+      var toggleConv = function () {
+        var collapsed = listWrap.classList.toggle('sb-conv-collapsed');
+        convHdr.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      };
+      convHdr.addEventListener('click', toggleConv);
+      convHdr.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleConv(); }
+      });
+    }
+
+    // ── Upgrade banner (SuperGrok-style) → opens existing plan modal ──
+    var upgradeBanner = document.getElementById('sbUpgradeBanner');
+    if (upgradeBanner) {
+      upgradeBanner.addEventListener('click', function () {
+        if (typeof openPlanModal === 'function') openPlanModal();
+      });
+    }
+
+    // ── Secondary chevron next to profile → collapse / close sidebar ──
+    var profileExpandBtn = document.getElementById('sbProfileExpandBtn');
+    if (profileExpandBtn) {
+      profileExpandBtn.addEventListener('click', function () {
+        if (typeof isMob === 'function' && isMob()) {
+          if (typeof closeMobSidebar === 'function') closeMobSidebar();
+        } else if (typeof setSidebarCollapsed === 'function') {
+          setSidebarCollapsed(!APP.sidebarCollapsed);
+        }
+      });
+    }
+
+    // ── Bottom-bar compose button → same action as New Chat ──────────
+    var composeBtn = document.getElementById('sbNewBtn2');
+    if (composeBtn) {
+      composeBtn.addEventListener('click', function () {
+        APP.activeChatId = null;
+        if (typeof save === 'function') save();
+        if (typeof showWelcome === 'function') showWelcome();
+        if (typeof renderChatList === 'function') renderChatList();
+        var ta = document.getElementById('msg-ta');
+        if (ta) ta.focus();
+      });
+    }
+  });
+})();
+// ── END GROK-STYLE SIDEBAR PATCH ────────────────────────────────────────────
