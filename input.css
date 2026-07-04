@@ -1,0 +1,203 @@
+/* ══════════════════════════════════════════════════════════════
+   ZenQ — Tailwind v4 Theme Layer
+   Primitive tokens defined as plain CSS variables (so [data-theme]
+   swapping still works exactly like it did before — Tailwind's
+   @theme values are compile-time, so we reference primitives from
+   @theme instead of hard-coding them there).
+   ══════════════════════════════════════════════════════════════ */
+
+@import "tailwindcss";
+
+/* ── 1. PRIMITIVES (dark = default, matches original :root) ── */
+:root {
+  --font-display: 'Syne', sans-serif;
+  --font-body:    'DM Sans', sans-serif;
+  --font-mono:    'JetBrains Mono', monospace;
+
+  --bg-void:   #000000;
+  --bg-deep:   #080808;
+  --bg-base:   #0f0f0f;
+  --bg-raised: #141414;
+  --bg-float:  #1a1a1a;
+
+  --glass-bg:        #0a0a0a;
+  --glass-bg-2:      #121212;
+  --glass-bg-3:      #1a1a1a;
+  --glass-border:    #1f1f1f;
+  --glass-border-2:  #2a2a2a;
+  --glass-shine:     #141414;
+
+  --ink-1: #ffffff;
+  --ink-2: #a0a0a0;
+  --ink-3: #555555;
+  --ink-4: #2a2a2a;
+
+  --accent:   #6c6ef7;
+  --accent-2: #8b5cf6;
+  --mint:     #06d6a0;
+  --red:      #f25c6e;
+  --amber:    #f5a623;
+  --blue:     #38bdf8;
+
+  --accent-glow:  rgba(108,110,247,0.18);
+  --accent-glow2: rgba(139,92,246,0.12);
+  --mint-glow:    rgba(6,214,160,0.14);
+
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 26px;
+  --r-full: 9999px;
+
+  --ease-spring: cubic-bezier(0.25,0.46,0.45,0.94);
+  --ease-out:    cubic-bezier(0.16,1,0.3,1);
+  --ease-io:     cubic-bezier(0.4,0,0.2,1);
+  --spring-soft: cubic-bezier(0.34,1.56,0.64,1);
+  --t: 0.18s;
+  --t-slow: 0.32s;
+
+  --shadow-glow:  0 0 24px rgba(108,110,247,0.10);
+  --shadow-float: 0 4px 18px rgba(0,0,0,0.60), 0 0 0 1px var(--glass-border);
+  --shadow-card:  0 2px 8px rgba(0,0,0,0.50);
+
+  --sidebar-w:     268px;
+  --sidebar-icons: 64px;
+  --hdr-h:         56px;
+  --msg-gap:       8px;
+
+  /* z-index scale — verified against index.html; the old --z-legacy-backdrop-19
+     and --z-toast-legacy tokens are intentionally OMITTED here: both were dead
+     rules unreachable in the cascade (confirmed against inline styles in HTML
+     and toast markup app.js actually injects). Do not reintroduce them. */
+  --z-behind: -1;
+  --z-base: 0;
+  --z-app: 1;
+  --z-raised: 2;
+  --z-avatar-action: 3;
+  --z-avatar-spinner: 4;
+  --z-stop-btn: 10;
+  --z-swipe-handle: 18;
+  --z-sidebar: 20;
+  --z-msgs-blur: 45;
+  --z-input-area: 50;
+  --z-scroll-fab: 60;
+  --z-chat-header: 100;
+  --z-mobile-backdrop: 190;
+  --z-model-menu: 200;
+  --z-settings-overlay: 300;
+  --z-settings-panel: 301;
+  --z-popover: 500;
+  --z-voice-overlay: 600;
+  --z-cmd-overlay: 800;
+  --z-modal-overlay: 900;
+  --z-drop-overlay: 1000;
+  --z-ctx-menu-alt: 1200;
+  --z-msg-ctx-backdrop: 1299;
+  --z-msg-ctx-menu: 1300;
+  --z-guest-limit-overlay: 1500;
+  --z-chat-locked-overlay: 2000;
+  --z-ai-gate-overlay: 8000;
+  --z-offline-banner: 9000;
+  --z-more-menu: 9500;
+  --z-toast: 9999;
+  --z-auth-card: 10000;
+  --z-render-debug: 99998;
+  --z-perf-hud: 99999;
+  --z-frame-drop-indicator: 999999;
+}
+
+/* ── 2. LIGHT THEME OVERRIDES (unchanged behavior, just relocated) ── */
+[data-theme="light"] {
+  --bg-void:   #f0f0f0;
+  --bg-deep:   #e8e8e8;
+  --bg-base:   #f5f5f5;
+  --bg-raised: #ffffff;
+  --bg-float:  #fafafa;
+
+  --glass-bg:       #ffffff;
+  --glass-bg-2:     #fafafa;
+  --glass-bg-3:     #f0f0f0;
+  --glass-border:   #e0e0e0;
+  --glass-border-2: #d0d0d0;
+  --glass-shine:    #ffffff;
+
+  --ink-1: #000000;
+  --ink-2: #444444;
+  --ink-3: #888888;
+  --ink-4: #cccccc;
+
+  --accent:   #5a58e8;
+  --accent-2: #7c3aed;
+  --mint:     #059669;
+
+  --accent-glow:  rgba(90,88,232,0.12);
+  --accent-glow2: rgba(124,58,237,0.10);
+
+  --shadow-float: 0 4px 16px rgba(0,0,0,0.10), 0 0 0 1px var(--glass-border);
+  --shadow-card:  0 2px 8px rgba(0,0,0,0.07);
+}
+
+/* ── 3. REDUCED MOTION (unchanged behavior) ── */
+@media (prefers-reduced-motion: reduce) {
+  :root { --blur: none; --blur-heavy: none; }
+}
+
+/* ── 4. TAILWIND THEME — maps primitives to utility-generating tokens.
+   This is what turns var(--accent) into bg-accent / text-accent / etc.  ── */
+@theme {
+  --font-display: var(--font-display);
+  --font-body:    var(--font-body);
+  --font-mono:    var(--font-mono);
+
+  --color-bg-void:   var(--bg-void);
+  --color-bg-deep:   var(--bg-deep);
+  --color-bg-base:   var(--bg-base);
+  --color-bg-raised: var(--bg-raised);
+  --color-bg-float:  var(--bg-float);
+
+  --color-glass:         var(--glass-bg);
+  --color-glass-2:       var(--glass-bg-2);
+  --color-glass-3:       var(--glass-bg-3);
+  --color-glass-border:  var(--glass-border);
+  --color-glass-border-2:var(--glass-border-2);
+
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+
+  --color-accent:   var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-mint:     var(--mint);
+  --color-red:      var(--red);
+  --color-amber:    var(--amber);
+  --color-blue:     var(--blue);
+
+  --radius-sm:   var(--r-sm);
+  --radius-md:   var(--r-md);
+  --radius-lg:   var(--r-lg);
+  --radius-xl:   var(--r-xl);
+  --radius-full: var(--r-full);
+
+  --ease-spring: var(--ease-spring);
+  --ease-out:    var(--ease-out);
+  --ease-io:     var(--ease-io);
+
+  --shadow-glow:  var(--shadow-glow);
+  --shadow-float: var(--shadow-float);
+  --shadow-card:  var(--shadow-card);
+
+  /* Custom breakpoints matched to the 84 media queries audited in style.css */
+  --breakpoint-xs: 380px;
+  --breakpoint-sm: 480px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 900px;
+  --breakpoint-xl: 1200px;
+  --breakpoint-2xl: 1440px;
+}
+
+/* Sources for the component + legacy layers, in cascade order.
+   "legacy" is intentionally unlayered (see legacy.css header comment)
+   so it always wins over @layer components until each rule is migrated. */
+@import "./components.css";
+@import "./legacy.css";
