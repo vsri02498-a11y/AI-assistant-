@@ -1,0 +1,1858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>ZenQ AI — Chat</title>
+
+<!--
+  ============================================================================
+  ZenQ AI — User Chat Page UI (Firebase Auth merged)
+  ============================================================================
+  This file is a self-contained 1:1 chat screen gated behind real Firebase
+  Authentication. There is no guest/anonymous entry point and no randomly
+  generated user id: `Backend.currentUser` is populated ONLY from a signed-in
+  Firebase user (Google, Email/Password, or Phone) once onAuthStateChanged
+  confirms a session. Until that happens, the #authGate screen is shown and
+  the chat UI stays hidden.
+
+  Messages, typing, and online status are still driven by a small mock/demo
+  data layer (see "HOOK:" comments in the INTEGRATION LAYER) — swap those for
+  real Firestore listeners when you wire up the messaging backend. Auth is
+  real; the message transport is still a placeholder.
+  ============================================================================
+-->
+
+<style>
+  :root{
+    /* ---- ZenQ AI monochrome design tokens ---- */
+    --bg:            #0a0a0a;
+    --bg-elevated:   #121212;
+    --bg-composer:   #141414;
+    --surface:       #1a1a1a;
+    --surface-2:     #202020;
+    --border:        #2a2a2a;
+    --border-soft:   #1f1f1f;
+    --text:          #f5f5f5;
+    --text-dim:      #a3a3a3;
+    --text-faint:    #6b6b6b;
+    --bubble-mine:   #f5f5f5;
+    --bubble-mine-text: #0a0a0a;
+    --bubble-theirs: #1c1c1c;
+    --online:        #3ecf6e;
+    --danger:        #e5484d;
+    --danger-bg:     rgba(229,72,77,0.12);
+    --focus:         #f5f5f5;
+
+    --radius-lg: 18px;
+    --radius-md: 12px;
+    --radius-sm: 8px;
+    --ease: cubic-bezier(.22,.61,.36,1);
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{
+    height:100%;
+    margin:0;
+    background:#000;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overscroll-behavior:none;
+  }
+  button{ font-family:inherit; }
+  ::selection{ background:#3a3a3a; }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
+  }
+
+  /* Visible keyboard focus everywhere, no exceptions */
+  :focus-visible{
+    outline:2px solid var(--focus);
+    outline-offset:2px;
+    border-radius:6px;
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* App shell: full-screen on mobile, centered card on desktop             */
+  /* ---------------------------------------------------------------------- */
+  .app-shell{
+    height:100dvh;
+    width:100%;
+    display:flex;
+    justify-content:center;
+    align-items:stretch;
+    background:#000;
+  }
+
+  .chat-container{
+    display:flex;
+    flex-direction:column;
+    width:100%;
+    height:100%;
+    background:var(--bg);
+    position:relative;
+    overflow:hidden;
+  }
+  .chat-container.hidden{ display:none; }
+
+  @media (min-width: 860px){
+    .app-shell{ padding:28px 16px; }
+    .chat-container{
+      max-width:620px;
+      height:calc(100dvh - 56px);
+      max-height:920px;
+      border:1px solid var(--border-soft);
+      border-radius:20px;
+      box-shadow:0 20px 60px rgba(0,0,0,.55);
+    }
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* Top bar                                                                 */
+  /* ---------------------------------------------------------------------- */
+  .topbar{
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:calc(env(safe-area-inset-top) + 10px) 10px 10px 6px;
+    background:var(--bg-elevated);
+    border-bottom:1px solid var(--border-soft);
+    position:relative;
+    z-index:20;
+  }
+  @media (min-width:860px){ .topbar{ padding:14px 14px 14px 8px; border-radius:20px 20px 0 0; } }
+
+  .icon-btn{
+    width:40px;height:40px;
+    display:flex;align-items:center;justify-content:center;
+    background:transparent;
+    border:none;
+    border-radius:50%;
+    color:var(--text);
+    cursor:pointer;
+    flex:0 0 auto;
+    transition:background .15s var(--ease);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .icon-btn:hover{ background:var(--surface); }
+  .icon-btn:active{ background:var(--surface-2); }
+  .icon-btn svg{ width:20px;height:20px; }
+
+  .peer{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex:1 1 auto;
+    min-width:0;
+    background:transparent;
+    border:none;
+    color:inherit;
+    cursor:pointer;
+    padding:6px 4px;
+    border-radius:12px;
+    text-align:left;
+  }
+  .peer:hover{ background:var(--surface); }
+
+  .avatar{
+    position:relative;
+    flex:0 0 auto;
+    width:38px;height:38px;
+    border-radius:50%;
+    background:linear-gradient(145deg,#2a2a2a,#151515);
+    display:flex;align-items:center;justify-content:center;
+    font-size:14px;
+    font-weight:600;
+    color:var(--text);
+    border:1px solid var(--border);
+  }
+  .avatar.sm{ width:28px;height:28px; font-size:11px; }
+  .status-dot{
+    position:absolute;
+    right:-1px;bottom:-1px;
+    width:10px;height:10px;
+    border-radius:50%;
+    background:var(--text-faint);
+    border:2px solid var(--bg-elevated);
+  }
+  .status-dot.online{ background:var(--online); }
+
+  .peer-meta{ min-width:0; }
+  .peer-name{
+    font-size:15px;
+    font-weight:600;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .anon-badge{
+    font-size:10px;
+    font-weight:600;
+    letter-spacing:.03em;
+    color:var(--text-faint);
+    border:1px solid var(--border);
+    padding:1px 6px;
+    border-radius:20px;
+    text-transform:uppercase;
+    flex:0 0 auto;
+  }
+  .peer-status{
+    font-size:12px;
+    color:var(--text-dim);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .peer-status.online-text{ color:var(--online); }
+
+  /* Menu dropdown */
+  .menu-wrap{ position:relative; flex:0 0 auto; }
+  .dropdown{
+    position:absolute;
+    top:calc(100% + 6px);
+    right:0;
+    min-width:210px;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:6px;
+    box-shadow:0 12px 32px rgba(0,0,0,.5);
+    opacity:0;
+    transform:translateY(-6px) scale(.98);
+    pointer-events:none;
+    transition:opacity .14s var(--ease), transform .14s var(--ease);
+    z-index:30;
+  }
+  .dropdown.open{ opacity:1; transform:translateY(0) scale(1); pointer-events:auto; }
+  .dropdown button{
+    width:100%;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    background:none;
+    border:none;
+    color:var(--text);
+    font-size:14px;
+    padding:10px 10px;
+    border-radius:9px;
+    cursor:pointer;
+    text-align:left;
+  }
+  .dropdown button:hover{ background:var(--surface-2); }
+  .dropdown button.danger{ color:var(--danger); }
+  .dropdown button svg{ width:17px;height:17px;flex:0 0 auto; opacity:.9; }
+  .dropdown hr{ border:none; border-top:1px solid var(--border-soft); margin:5px 4px; }
+
+  /* Offline banner */
+  .offline-banner{
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    font-size:12.5px;
+    color:#d9b400;
+    background:rgba(217,180,0,0.1);
+    padding:0;
+    max-height:0;
+    overflow:hidden;
+    transition:max-height .25s var(--ease), padding .25s var(--ease);
+  }
+  .offline-banner.show{ max-height:40px; padding:8px 12px; }
+
+  /* Privacy strip */
+  .privacy-strip{
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:12px;
+    color:var(--text-faint);
+    padding:8px 16px;
+    border-bottom:1px solid var(--border-soft);
+    background:var(--bg);
+  }
+  .privacy-strip svg{ width:13px;height:13px; flex:0 0 auto; }
+
+  /* ---------------------------------------------------------------------- */
+  /* Message list                                                            */
+  /* ---------------------------------------------------------------------- */
+  .messages{
+    flex:1 1 auto;
+    overflow-y:auto;
+    padding:14px 12px 8px;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    position:relative;
+    scrollbar-width:thin;
+    scrollbar-color:#2a2a2a transparent;
+  }
+  .messages::-webkit-scrollbar{ width:6px; }
+  .messages::-webkit-scrollbar-thumb{ background:#2a2a2a; border-radius:10px; }
+
+  .day-divider{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    margin:14px 0 10px;
+  }
+  .day-divider span{
+    font-size:11px;
+    color:var(--text-faint);
+    background:var(--surface);
+    padding:4px 12px;
+    border-radius:20px;
+  }
+
+  .row{
+    display:flex;
+    width:100%;
+    margin:3px 0;
+    animation:rise .18s var(--ease);
+  }
+  @keyframes rise{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+  .row.mine{ justify-content:flex-end; }
+  .row.theirs{ justify-content:flex-start; }
+
+  .bubble-wrap{
+    max-width:78%;
+    display:flex;
+    flex-direction:column;
+    position:relative;
+  }
+  .row.mine .bubble-wrap{ align-items:flex-end; }
+  .row.theirs .bubble-wrap{ align-items:flex-start; }
+
+  .reply-quote{
+    font-size:12px;
+    color:var(--text-dim);
+    background:rgba(255,255,255,0.05);
+    border-left:2px solid var(--text-faint);
+    padding:5px 8px;
+    border-radius:6px;
+    margin-bottom:4px;
+    max-width:100%;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .row.mine .reply-quote{ background:rgba(0,0,0,0.15); border-left-color:rgba(10,10,10,.35); }
+
+  .bubble{
+    padding:9px 13px;
+    border-radius:var(--radius-lg);
+    font-size:14.5px;
+    line-height:1.42;
+    word-wrap:break-word;
+    white-space:pre-wrap;
+    position:relative;
+    cursor:default;
+  }
+  .row.theirs .bubble{
+    background:var(--bubble-theirs);
+    color:var(--text);
+    border-bottom-left-radius:4px;
+  }
+  .row.mine .bubble{
+    background:var(--bubble-mine);
+    color:var(--bubble-mine-text);
+    border-bottom-right-radius:4px;
+  }
+  .bubble.failed{ background:var(--danger-bg); color:var(--danger); border:1px solid rgba(229,72,77,.35); }
+
+  .meta-row{
+    display:flex;
+    align-items:center;
+    gap:5px;
+    margin-top:3px;
+    padding:0 3px;
+  }
+  .timestamp{ font-size:10.5px; color:var(--text-faint); }
+  .msg-status{ display:flex; align-items:center; color:var(--text-faint); }
+  .msg-status svg{ width:13px;height:13px; }
+  .msg-status.sent-check{ color:var(--text-faint); }
+  .msg-status.delivered{ color:var(--text-dim); }
+
+  .retry-btn{
+    font-size:11px;
+    color:var(--danger);
+    background:none;
+    border:none;
+    cursor:pointer;
+    padding:2px 4px;
+    font-weight:600;
+    text-decoration:underline;
+  }
+
+  .sending-dot{
+    width:6px;height:6px;border-radius:50%;
+    background:var(--text-faint);
+    animation:pulse 1s infinite ease-in-out;
+  }
+  @keyframes pulse{ 0%,100%{opacity:.3;} 50%{opacity:1;} }
+
+  /* Long-press / hover action menu */
+  .action-menu{
+    position:absolute;
+    bottom:calc(100% + 4px);
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:4px;
+    display:flex;
+    gap:2px;
+    box-shadow:0 10px 26px rgba(0,0,0,.5);
+    opacity:0;
+    transform:translateY(4px) scale(.96);
+    pointer-events:none;
+    transition:opacity .12s var(--ease), transform .12s var(--ease);
+    z-index:15;
+  }
+  .row.mine .action-menu{ right:0; }
+  .row.theirs .action-menu{ left:0; }
+  .action-menu.open{ opacity:1; transform:translateY(0) scale(1); pointer-events:auto; }
+  .action-menu button{
+    width:34px;height:34px;
+    display:flex;align-items:center;justify-content:center;
+    background:none;border:none;border-radius:8px;
+    color:var(--text-dim);
+    cursor:pointer;
+  }
+  .action-menu button:hover{ background:var(--surface-2); color:var(--text); }
+  .action-menu button.danger:hover{ color:var(--danger); }
+  .action-menu svg{ width:16px;height:16px; }
+
+  /* Typing indicator */
+  .typing-row{ display:flex; margin:4px 0 8px; }
+  .typing-bubble{
+    background:var(--bubble-theirs);
+    padding:11px 14px;
+    border-radius:var(--radius-lg);
+    border-bottom-left-radius:4px;
+    display:flex;
+    gap:4px;
+  }
+  .typing-bubble span{
+    width:6px;height:6px;border-radius:50%;
+    background:var(--text-dim);
+    animation:bounce 1.2s infinite ease-in-out;
+  }
+  .typing-bubble span:nth-child(2){ animation-delay:.15s; }
+  .typing-bubble span:nth-child(3){ animation-delay:.3s; }
+  @keyframes bounce{ 0%,60%,100%{ transform:translateY(0); opacity:.5; } 30%{ transform:translateY(-4px); opacity:1; } }
+
+  /* New-message pill */
+  .new-msg-pill{
+    position:absolute;
+    left:50%;
+    bottom:14px;
+    transform:translate(-50%, 12px);
+    background:var(--text);
+    color:var(--bg);
+    font-size:12.5px;
+    font-weight:600;
+    padding:8px 14px;
+    border-radius:24px;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    box-shadow:0 8px 20px rgba(0,0,0,.4);
+    cursor:pointer;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .18s var(--ease), transform .18s var(--ease);
+    z-index:10;
+  }
+  .new-msg-pill.show{ opacity:1; transform:translate(-50%,0); pointer-events:auto; }
+  .new-msg-pill svg{ width:14px;height:14px; }
+
+  /* Skeleton loading */
+  .skeleton-wrap{ padding:14px 12px; display:flex; flex-direction:column; gap:14px; }
+  .sk-row{ display:flex; gap:8px; }
+  .sk-row.mine{ justify-content:flex-end; }
+  .sk-bubble{
+    height:34px;
+    border-radius:16px;
+    background:linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 37%, var(--surface) 63%);
+    background-size:400% 100%;
+    animation:shimmer 1.4s ease infinite;
+  }
+  @keyframes shimmer{ 0%{background-position:100% 0;} 100%{background-position:0 0;} }
+
+  /* Empty state */
+  .empty-state{
+    flex:1 1 auto;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    padding:40px 30px;
+    gap:14px;
+  }
+  .empty-icon{
+    width:64px;height:64px;
+    border-radius:50%;
+    background:var(--surface);
+    border:1px solid var(--border);
+    display:flex;align-items:center;justify-content:center;
+    color:var(--text-dim);
+  }
+  .empty-icon svg{ width:28px;height:28px; }
+  .empty-title{ font-size:16px; font-weight:600; color:var(--text); }
+  .empty-sub{ font-size:13px; color:var(--text-dim); max-width:260px; line-height:1.5; }
+  .empty-privacy{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-size:11.5px;
+    color:var(--text-faint);
+    border:1px solid var(--border-soft);
+    padding:6px 12px;
+    border-radius:20px;
+    margin-top:4px;
+  }
+  .empty-privacy svg{ width:12px;height:12px; }
+
+  /* ---------------------------------------------------------------------- */
+  /* Reply preview above composer                                           */
+  /* ---------------------------------------------------------------------- */
+  .reply-preview{
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:8px 14px;
+    background:var(--bg-elevated);
+    border-top:1px solid var(--border-soft);
+    max-height:0;
+    overflow:hidden;
+    opacity:0;
+    transition:max-height .18s var(--ease), opacity .18s var(--ease), padding .18s var(--ease);
+  }
+  .reply-preview.show{ max-height:60px; opacity:1; }
+  .reply-preview .bar{ width:3px; align-self:stretch; background:var(--text-faint); border-radius:3px; }
+  .reply-preview .rp-text{ flex:1 1 auto; min-width:0; }
+  .reply-preview .rp-label{ font-size:11px; color:var(--text-dim); font-weight:600; }
+  .reply-preview .rp-body{ font-size:13px; color:var(--text-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .reply-preview .rp-close{ flex:0 0 auto; }
+
+  /* ---------------------------------------------------------------------- */
+  /* Composer                                                                */
+  /* ---------------------------------------------------------------------- */
+  .composer{
+    flex:0 0 auto;
+    display:flex;
+    align-items:flex-end;
+    gap:6px;
+    padding:8px 8px calc(env(safe-area-inset-bottom) + 8px);
+    background:var(--bg-composer);
+    border-top:1px solid var(--border-soft);
+  }
+  @media (min-width:860px){ .composer{ border-radius:0 0 20px 20px; } }
+
+  .composer-field{
+    flex:1 1 auto;
+    display:flex;
+    align-items:flex-end;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:22px;
+    padding:6px 6px 6px 14px;
+    min-height:44px;
+    transition:border-color .15s var(--ease);
+  }
+  .composer-field:focus-within{ border-color:#4a4a4a; }
+
+  .composer-input{
+    flex:1 1 auto;
+    background:none;
+    border:none;
+    color:var(--text);
+    font-size:15px;
+    line-height:1.4;
+    max-height:120px;
+    min-height:24px;
+    padding:6px 4px;
+    resize:none;
+    outline:none;
+    font-family:inherit;
+  }
+  .composer-input::placeholder{ color:var(--text-faint); }
+
+  .send-btn{
+    width:38px;height:38px;
+    border-radius:50%;
+    border:none;
+    background:var(--text);
+    color:var(--bg);
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;
+    flex:0 0 auto;
+    transition:transform .12s var(--ease), background .15s var(--ease), opacity .15s var(--ease);
+  }
+  .send-btn svg{ width:17px;height:17px; margin-left:1px; }
+  .send-btn:active{ transform:scale(.9); }
+  .send-btn:disabled{ background:var(--surface-2); color:var(--text-faint); cursor:not-allowed; }
+
+  .composer .icon-btn{ width:40px;height:40px; color:var(--text-dim); }
+
+  /* Emoji popover (lightweight, no external deps) */
+  .emoji-pop{
+    position:absolute;
+    bottom:calc(100% + 8px);
+    left:8px;
+    width:260px;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:10px;
+    display:grid;
+    grid-template-columns:repeat(7,1fr);
+    gap:4px;
+    box-shadow:0 12px 32px rgba(0,0,0,.5);
+    opacity:0;
+    transform:translateY(6px) scale(.97);
+    pointer-events:none;
+    transition:opacity .14s var(--ease), transform .14s var(--ease);
+    z-index:25;
+    max-height:180px;
+    overflow-y:auto;
+  }
+  .emoji-pop.open{ opacity:1; transform:translateY(0) scale(1); pointer-events:auto; }
+  .emoji-pop button{
+    background:none;border:none;font-size:19px;
+    padding:5px 0;border-radius:8px;cursor:pointer;
+  }
+  .emoji-pop button:hover{ background:var(--surface-2); }
+
+  .composer-wrap{ position:relative; flex:1 1 auto; display:flex; }
+
+  /* Toast (report / block confirmations) */
+  .toast{
+    position:absolute;
+    bottom:84px;
+    left:50%;
+    transform:translate(-50%,10px);
+    background:var(--surface);
+    border:1px solid var(--border);
+    color:var(--text);
+    font-size:13px;
+    padding:10px 16px;
+    border-radius:12px;
+    box-shadow:0 10px 26px rgba(0,0,0,.5);
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .2s var(--ease), transform .2s var(--ease);
+    z-index:40;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    max-width:88%;
+  }
+  .toast.show{ opacity:1; transform:translate(-50%,0); }
+  .toast svg{ width:15px;height:15px; flex:0 0 auto; }
+
+  /* Confirm dialog (block/report/delete) */
+  .modal-scrim{
+    position:absolute; inset:0;
+    background:rgba(0,0,0,.55);
+    display:flex; align-items:center; justify-content:center;
+    padding:24px;
+    opacity:0; pointer-events:none;
+    transition:opacity .16s var(--ease);
+    z-index:50;
+  }
+  .modal-scrim.open{ opacity:1; pointer-events:auto; }
+  .modal-card{
+    width:100%; max-width:320px;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:16px;
+    padding:20px;
+    transform:translateY(8px) scale(.97);
+    transition:transform .16s var(--ease);
+  }
+  .modal-scrim.open .modal-card{ transform:translateY(0) scale(1); }
+  .modal-title{ font-size:16px; font-weight:700; margin:0 0 6px; }
+  .modal-body{ font-size:13.5px; color:var(--text-dim); line-height:1.5; margin:0 0 18px; }
+  .modal-actions{ display:flex; gap:8px; justify-content:flex-end; }
+  .modal-actions button{
+    padding:9px 16px;
+    border-radius:10px;
+    border:1px solid var(--border);
+    background:none;
+    color:var(--text);
+    font-size:13.5px;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .modal-actions button.danger{ background:var(--danger); border-color:var(--danger); color:#fff; }
+  .modal-actions button:hover{ filter:brightness(1.15); }
+
+  .sr-only{
+    position:absolute; width:1px;height:1px;
+    padding:0;margin:-1px;overflow:hidden;
+    clip:rect(0,0,0,0); white-space:nowrap; border:0;
+  }
+
+  /* ---- Auth gate ---- */
+  .auth-gate{
+    position:fixed; inset:0; z-index:500;
+    background:var(--bg);
+    display:flex; align-items:center; justify-content:center;
+    padding:24px;
+  }
+  .auth-gate.hidden{ display:none; }
+  .auth-card{ width:100%; max-width:360px; }
+  .auth-logo{
+    width:52px; height:52px; border-radius:14px;
+    background:var(--text); color:#000;
+    display:flex; align-items:center; justify-content:center;
+    font-weight:800; font-size:20px; margin:0 auto 18px;
+  }
+  .auth-title{ font-size:20px; font-weight:700; text-align:center; margin:0 0 6px; }
+  .auth-sub{ font-size:13.5px; color:var(--text-dim); text-align:center; margin:0 0 24px; line-height:1.5; }
+  .auth-check{ text-align:center; color:var(--text-dim); font-size:13.5px; padding:40px 0; }
+  .auth-btn{
+    width:100%; display:flex; align-items:center; justify-content:center; gap:10px;
+    padding:12px 14px; border-radius:var(--radius-md);
+    border:1px solid var(--border); background:var(--surface); color:var(--text);
+    font-size:14.5px; font-weight:600; cursor:pointer; margin-bottom:10px;
+  }
+  .auth-btn:hover{ background:var(--surface-2); }
+  .auth-btn:disabled{ opacity:.6; cursor:default; }
+  .auth-btn svg{ width:18px; height:18px; flex:none; }
+  .auth-divider{ display:flex; align-items:center; gap:10px; color:var(--text-faint); font-size:12px; margin:16px 0; }
+  .auth-divider::before,.auth-divider::after{ content:""; flex:1; height:1px; background:var(--border); }
+  .auth-field{ margin-bottom:10px; }
+  .auth-field input{
+    width:100%; padding:12px 14px; border-radius:var(--radius-md);
+    border:1px solid var(--border); background:var(--bg-elevated); color:var(--text);
+    font-size:14.5px; outline:none;
+  }
+  .auth-field input:focus{ border-color:var(--focus); }
+  .auth-error{ color:var(--danger); font-size:12.5px; margin:2px 0 10px; display:none; }
+  .auth-error.show{ display:block; }
+  .auth-submit{
+    width:100%; padding:12px 14px; border-radius:var(--radius-md); border:none;
+    background:var(--text); color:#000; font-size:14.5px; font-weight:700; cursor:pointer; margin-top:4px;
+  }
+  .auth-submit:disabled{ opacity:.6; cursor:default; }
+  .auth-toggle{ background:none; border:none; color:var(--text-dim); font-size:13px; width:100%; text-align:center; padding:14px 0 0; cursor:pointer; }
+  .auth-toggle:hover{ color:var(--text); }
+  .auth-locked-note{ display:flex; gap:8px; align-items:flex-start; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:12px; font-size:12.5px; color:var(--text-dim); margin-top:18px; line-height:1.5; }
+  .auth-locked-note svg{ flex:none; width:16px; height:16px; margin-top:1px; }
+  #authRecaptchaContainer{ margin-top:4px; }
+</style>
+</head>
+<body>
+
+<!-- ================= AUTH GATE ================= -->
+<!-- Only a signed-in Firebase account (Google, Email/Password, or Phone) may
+     pass this screen. There is no guest/anonymous/skip option and no
+     randomly-generated user id — the chat user's identity IS the Firebase
+     account (uid, displayName, email), full stop. -->
+<div class="auth-gate" id="authGate">
+  <div class="auth-card">
+    <div class="auth-logo">Z</div>
+
+    <div id="authCheckingView" class="auth-check">Checking your session…</div>
+
+    <div id="authFormView" style="display:none;">
+      <h1 class="auth-title">Sign in to chat</h1>
+      <p class="auth-sub">This chat is only available to registered ZenQ accounts. Sign in or create an account to continue.</p>
+
+      <button class="auth-btn" id="authGoogleBtn" type="button">
+        <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M23.52 12.27c0-.85-.08-1.67-.22-2.45H12v4.63h6.47a5.53 5.53 0 0 1-2.4 3.63v3h3.87c2.27-2.09 3.58-5.17 3.58-8.81z"/><path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.92l-3.87-3c-1.08.72-2.45 1.15-4.08 1.15-3.13 0-5.78-2.11-6.73-4.96H1.27v3.09A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.27 14.27a7.2 7.2 0 0 1 0-4.54v-3.1H1.27a12 12 0 0 0 0 10.73z"/><path fill="#EA4335" d="M12 4.77c1.77 0 3.35.61 4.6 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.27 6.63l4 3.1C6.22 6.88 8.87 4.77 12 4.77z"/></svg>
+        <span id="authGoogleLabel">Continue with Google</span>
+      </button>
+
+      <div class="auth-divider">or</div>
+
+      <div class="auth-field">
+        <input type="email" id="authEmail" placeholder="Email" autocomplete="email">
+      </div>
+      <div class="auth-field">
+        <input type="password" id="authPassword" placeholder="Password" autocomplete="current-password">
+      </div>
+      <p class="auth-error" id="authError"></p>
+      <button class="auth-submit" id="authSubmitBtn" type="button">Log in</button>
+      <button class="auth-toggle" id="authToggleModeBtn" type="button">Don't have an account? Sign up</button>
+      <button class="auth-toggle" id="authPhoneToggleBtn" type="button">Use phone number instead</button>
+
+      <div id="authPhoneBlock" style="display:none;">
+        <div class="auth-field">
+          <input type="tel" id="authPhoneNumber" placeholder="+1 555 555 5555" autocomplete="tel">
+        </div>
+        <button class="auth-btn" id="authSendCodeBtn" type="button">Send code</button>
+        <div class="auth-field" id="authCodeField" style="display:none;">
+          <input type="text" inputmode="numeric" id="authPhoneCode" placeholder="6-digit code">
+        </div>
+        <button class="auth-submit" id="authVerifyCodeBtn" type="button" style="display:none;">Verify & continue</button>
+        <div id="authRecaptchaContainer"></div>
+      </div>
+
+      <div class="auth-locked-note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        <span>No guest access — every message is tied to a real, verified account. Random or anonymous chat ids have been disabled for safety.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="app-shell">
+  <main class="chat-container hidden" id="chatContainer" aria-label="Chat with anonymous user">
+
+    <!-- ================= TOP BAR ================= -->
+    <header class="topbar">
+      <button class="icon-btn" id="backBtn" aria-label="Back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+
+      <button class="peer" id="peerBtn" aria-haspopup="true">
+        <span class="avatar" id="peerAvatar">
+          <span id="peerInitial">?</span>
+          <span class="status-dot" id="peerStatusDot"></span>
+        </span>
+        <span class="peer-meta">
+          <span class="peer-name">
+            <span id="peerName">Anonymous</span>
+            <span class="anon-badge">Anon</span>
+          </span>
+          <span class="peer-status" id="peerStatusText">offline</span>
+        </span>
+      </button>
+
+      <div class="menu-wrap">
+        <button class="icon-btn" id="menuBtn" aria-label="Chat options" aria-haspopup="true" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+        </button>
+        <div class="dropdown" id="menuDropdown" role="menu">
+          <button role="menuitem" id="viewProfileBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+            View profile
+          </button>
+          <button role="menuitem" id="muteBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5 6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+            Mute notifications
+          </button>
+          <button role="menuitem" id="clearChatBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+            Clear chat
+          </button>
+          <hr>
+          <button role="menuitem" id="reportBtn" class="danger">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Report user
+          </button>
+          <button role="menuitem" id="blockBtn" class="danger">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg>
+            Block user
+          </button>
+          <hr>
+          <button role="menuitem" id="signOutBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Sign out
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Offline connection indicator -->
+    <div class="offline-banner" id="offlineBanner">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0119 12.55"/><path d="M5 12.55a10.94 10.94 0 015.17-2.39"/><path d="M10.71 5.05A16 16 0 0122.58 9"/><path d="M1.42 9a15.91 15.91 0 014.7-2.88"/><path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+      You're offline — messages will send when reconnected
+    </div>
+
+    <!-- Anonymous privacy strip -->
+    <div class="privacy-strip">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+      This is an anonymous chat. Your email and phone number are never shared.
+    </div>
+
+    <!-- ================= MESSAGE LIST ================= -->
+    <div class="messages" id="messages" tabindex="0">
+      <!-- populated by JS: skeleton → empty state → message rows -->
+    </div>
+
+    <!-- New message pill -->
+    <button class="new-msg-pill" id="newMsgPill">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+      New message
+    </button>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <!-- Reply preview -->
+    <div class="reply-preview" id="replyPreview">
+      <span class="bar"></span>
+      <span class="rp-text">
+        <span class="rp-label">Replying to <span id="replyToName"></span></span>
+        <span class="rp-body" id="replyToBody"></span>
+      </span>
+      <button class="icon-btn rp-close" id="replyCloseBtn" aria-label="Cancel reply">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- ================= COMPOSER ================= -->
+    <form class="composer" id="composerForm">
+      <button type="button" class="icon-btn" id="attachBtn" aria-label="Attach file">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+      </button>
+
+      <div class="composer-wrap">
+        <button type="button" class="icon-btn" id="emojiBtn" aria-label="Emoji" style="position:relative;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+        </button>
+        <div class="emoji-pop" id="emojiPop"></div>
+      </div>
+
+      <div class="composer-field">
+        <textarea
+          class="composer-input"
+          id="messageInput"
+          rows="1"
+          placeholder="Message anonymously…"
+          aria-label="Message"
+          maxlength="2000"></textarea>
+      </div>
+
+      <button type="submit" class="send-btn" id="sendBtn" disabled aria-label="Send message">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+      </button>
+    </form>
+
+    <!-- ================= MODALS ================= -->
+    <div class="modal-scrim" id="modalScrim">
+      <div class="modal-card">
+        <h3 class="modal-title" id="modalTitle">Block this user?</h3>
+        <p class="modal-body" id="modalBody">You won't receive messages from them anymore, and they won't be notified.</p>
+        <div class="modal-actions">
+          <button id="modalCancel">Cancel</button>
+          <button id="modalConfirm" class="danger">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ==========================================================================
+     INTEGRATION LAYER — HOOK POINTS
+     --------------------------------------------------------------------------
+     Everything in this block is a placeholder demo/mock data source, isolated
+     on purpose. Replace the bodies of these functions with real Firebase
+     Auth / Firestore / your existing messaging API calls. The rest of the
+     script only talks to these functions — no other code needs to change.
+  ========================================================================== */
+  const Backend = {
+    // Populated ONLY by handleAuthStateChange() below, from the real,
+    // signed-in Firebase user. There is no default/guest value — if this is
+    // still null, the auth gate hasn't let the user through yet, and no
+    // chat code should be running.
+    currentUser: null,
+
+    // HOOK: replace with the peer's anonymized profile doc from Firestore
+    peer: { id: "u_8841", displayName: "Anonymous Fox", online: true, typing: false },
+
+    // HOOK: replace with a Firestore onSnapshot listener on the messages subcollection
+    // Demo seed data only — remove when wiring real data.
+    seedMessages(){
+      const now = Date.now();
+      return [
+        { id:"m1", from:"peer",  text:"Hey! Is this seat still open in the study group?", ts: now - 1000*60*42, status:"read" },
+        { id:"m2", from:"me",    text:"Yep, still open — join whenever you're ready.", ts: now - 1000*60*40, status:"read" },
+        { id:"m3", from:"peer",  text:"Awesome, thank you. I'll drop in around 6pm.", ts: now - 1000*60*38, status:"read" },
+        { id:"m4", from:"me",    text:"Sounds good 👍", ts: now - 1000*60*37, status:"read" },
+        { id:"m5", from:"peer",  text:"Quick one — do we need to bring our own notes or is there a shared doc?", ts: now - 1000*60*5, status:"read", replyTo:null },
+      ];
+    },
+
+    // HOOK: send message via your existing API/Firestore write
+    sendMessage(text, replyTo){ return Promise.resolve({ ok:true }); },
+
+    // HOOK: report user via your moderation API
+    reportUser(reason){ return Promise.resolve({ ok:true }); },
+
+    // HOOK: block user via your existing API
+    blockUser(){ return Promise.resolve({ ok:true }); },
+
+    // HOOK: delete own message via your existing API
+    deleteMessage(id){ return Promise.resolve({ ok:true }); },
+  };
+
+  /* ==========================================================================
+     STATE
+  ========================================================================== */
+  const state = {
+    messages: [],
+    loading: true,
+    online: navigator.onLine,
+    replyTo: null,
+    openActionMenuId: null,
+    userScrolledUp: false,
+  };
+
+  const els = {
+    messages: document.getElementById("messages"),
+    newMsgPill: document.getElementById("newMsgPill"),
+    composerForm: document.getElementById("composerForm"),
+    input: document.getElementById("messageInput"),
+    sendBtn: document.getElementById("sendBtn"),
+    peerName: document.getElementById("peerName"),
+    peerInitial: document.getElementById("peerInitial"),
+    peerStatusDot: document.getElementById("peerStatusDot"),
+    peerStatusText: document.getElementById("peerStatusText"),
+    menuBtn: document.getElementById("menuBtn"),
+    menuDropdown: document.getElementById("menuDropdown"),
+    offlineBanner: document.getElementById("offlineBanner"),
+    toast: document.getElementById("toast"),
+    replyPreview: document.getElementById("replyPreview"),
+    replyToName: document.getElementById("replyToName"),
+    replyToBody: document.getElementById("replyToBody"),
+    replyCloseBtn: document.getElementById("replyCloseBtn"),
+    emojiBtn: document.getElementById("emojiBtn"),
+    emojiPop: document.getElementById("emojiPop"),
+    modalScrim: document.getElementById("modalScrim"),
+    modalTitle: document.getElementById("modalTitle"),
+    modalBody: document.getElementById("modalBody"),
+    modalCancel: document.getElementById("modalCancel"),
+    modalConfirm: document.getElementById("modalConfirm"),
+    reportBtn: document.getElementById("reportBtn"),
+    blockBtn: document.getElementById("blockBtn"),
+    clearChatBtn: document.getElementById("clearChatBtn"),
+    backBtn: document.getElementById("backBtn"),
+  };
+
+  /* ==========================================================================
+     UTIL
+  ========================================================================== */
+  function fmtTime(ts){
+    const d = new Date(ts);
+    let h = d.getHours(), m = d.getMinutes();
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12; if (h === 0) h = 12;
+    return `${h}:${String(m).padStart(2,"0")} ${ampm}`;
+  }
+  function fmtDay(ts){
+    const d = new Date(ts);
+    const today = new Date();
+    const yest = new Date(); yest.setDate(today.getDate()-1);
+    const sameDay = (a,b) => a.toDateString() === b.toDateString();
+    if (sameDay(d, today)) return "Today";
+    if (sameDay(d, yest)) return "Yesterday";
+    return d.toLocaleDateString(undefined, { month:"short", day:"numeric", year: d.getFullYear()!==today.getFullYear() ? "numeric" : undefined });
+  }
+  function escapeHtml(str){
+    return str.replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  }
+  function isNearBottom(el, threshold = 80){
+    return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+  }
+  function scrollToBottom(smooth){
+    els.messages.scrollTo({ top: els.messages.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+    state.userScrolledUp = false;
+    els.newMsgPill.classList.remove("show");
+  }
+  function showToast(msg, iconSvg){
+    els.toast.innerHTML = (iconSvg||"") + `<span>${escapeHtml(msg)}</span>`;
+    els.toast.classList.add("show");
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(()=> els.toast.classList.remove("show"), 2600);
+  }
+
+  const ICON_CHECK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+  /* ==========================================================================
+     PEER HEADER
+  ========================================================================== */
+  function renderPeer(){
+    const p = Backend.peer;
+    els.peerName.textContent = p.displayName;
+    els.peerInitial.textContent = p.displayName.trim().charAt(0).toUpperCase();
+    els.peerStatusDot.classList.toggle("online", !!p.online);
+    if (p.typing){
+      els.peerStatusText.textContent = "typing…";
+      els.peerStatusText.classList.remove("online-text");
+    } else {
+      els.peerStatusText.textContent = p.online ? "online" : "offline";
+      els.peerStatusText.classList.toggle("online-text", !!p.online);
+    }
+  }
+
+  /* ==========================================================================
+     MESSAGE LIST RENDERING
+  ========================================================================== */
+  function renderSkeleton(){
+    const pattern = [false,true,false,false,true];
+    els.messages.innerHTML = `<div class="skeleton-wrap">${
+      pattern.map(mine => `<div class="sk-row ${mine?'mine':''}"><div class="sk-bubble" style="width:${120+Math.random()*90|0}px"></div></div>`).join("")
+    }</div>`;
+  }
+
+  function findMessage(id){ return state.messages.find(m => m.id === id); }
+
+  function messageRowHtml(m, showDivider){
+    const mine = m.from === "me";
+    const replyBlock = m.replyTo ? (() => {
+      const r = findMessage(m.replyTo);
+      if (!r) return "";
+      return `<div class="reply-quote">${escapeHtml(r.text.slice(0,60))}</div>`;
+    })() : "";
+
+    let statusHtml = "";
+    if (mine){
+      if (m.status === "sending"){
+        statusHtml = `<span class="sending-dot" aria-label="Sending"></span>`;
+      } else if (m.status === "failed"){
+        statusHtml = `<button class="retry-btn" data-retry="${m.id}">Retry</button>`;
+      } else if (m.status === "delivered" || m.status === "read"){
+        statusHtml = `<span class="msg-status delivered">${ICON_CHECK}</span>`;
+      } else {
+        statusHtml = `<span class="msg-status sent-check">${ICON_CHECK}</span>`;
+      }
+    }
+
+    const bubbleClass = m.status === "failed" ? "bubble failed" : "bubble";
+
+    return `
+      ${showDivider ? `<div class="day-divider"><span>${fmtDay(m.ts)}</span></div>` : ""}
+      <div class="row ${mine ? "mine" : "theirs"}" data-id="${m.id}">
+        <div class="bubble-wrap">
+          <div class="action-menu" data-menu-for="${m.id}">
+            <button data-act="copy" aria-label="Copy message">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+            <button data-act="reply" aria-label="Reply">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 00-4-4H4"/></svg>
+            </button>
+            ${mine ? `<button data-act="delete" class="danger" aria-label="Delete message">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4h8v2"/></svg>
+            </button>` : `<button data-act="report" class="danger" aria-label="Report message">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </button>`}
+          </div>
+          ${replyBlock}
+          <div class="${bubbleClass}" data-toggle-actions="${m.id}">${escapeHtml(m.text)}</div>
+          <div class="meta-row">
+            <span class="timestamp">${fmtTime(m.ts)}</span>
+            ${statusHtml}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderMessages(){
+    if (state.loading){ renderSkeleton(); return; }
+
+    if (state.messages.length === 0){
+      els.messages.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+          </div>
+          <div class="empty-title">Start a conversation</div>
+          <div class="empty-sub">Say hello — messages here are anonymous and only visible to you and this user.</div>
+          <div class="empty-privacy">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            No personal info is ever shared
+          </div>
+        </div>`;
+      return;
+    }
+
+    let html = "";
+    let lastDay = null;
+    state.messages.forEach(m => {
+      const day = fmtDay(m.ts);
+      const showDivider = day !== lastDay;
+      lastDay = day;
+      html += messageRowHtml(m, showDivider);
+    });
+
+    if (Backend.peer.typing){
+      html += `
+        <div class="typing-row">
+          <div class="typing-bubble"><span></span><span></span><span></span></div>
+        </div>`;
+    }
+
+    els.messages.innerHTML = html;
+
+    if (state.openActionMenuId){
+      const menu = els.messages.querySelector(`.action-menu[data-menu-for="${state.openActionMenuId}"]`);
+      if (menu) menu.classList.add("open");
+    }
+  }
+
+  function appendAndScroll(wasNearBottom){
+    renderMessages();
+    if (wasNearBottom){
+      scrollToBottom(true);
+    } else {
+      els.newMsgPill.classList.add("show");
+    }
+  }
+
+  /* ==========================================================================
+     COMPOSER
+  ========================================================================== */
+  function autoGrow(){
+    els.input.style.height = "auto";
+    els.input.style.height = Math.min(els.input.scrollHeight, 120) + "px";
+  }
+
+  function updateSendState(){
+    els.sendBtn.disabled = els.input.value.trim().length === 0;
+  }
+
+  function setReply(msg){
+    state.replyTo = msg ? msg.id : null;
+    if (msg){
+      els.replyToName.textContent = msg.from === "me" ? "yourself" : Backend.peer.displayName;
+      els.replyToBody.textContent = msg.text;
+      els.replyPreview.classList.add("show");
+    } else {
+      els.replyPreview.classList.remove("show");
+    }
+    els.input.focus();
+  }
+
+  function sendCurrentMessage(){
+    const text = els.input.value.trim();
+    if (!text) return;
+
+    const tempId = "temp_" + Date.now();
+    const msg = { id: tempId, from: "me", text, ts: Date.now(), status: state.online ? "sending" : "failed", replyTo: state.replyTo };
+    state.messages.push(msg);
+
+    els.input.value = "";
+    autoGrow();
+    updateSendState();
+    setReply(null);
+    appendAndScroll(true);
+
+    if (!state.online){
+      return; // stays as failed with Retry, per offline state
+    }
+
+    // HOOK: real send — replace this simulated resolve/timeout with Backend.sendMessage()
+    Backend.sendMessage(text, msg.replyTo).then(() => {
+      setTimeout(() => {
+        const m = findMessage(tempId);
+        if (m){ m.status = "delivered"; renderMessages(); }
+      }, 500 + Math.random()*400);
+    }).catch(() => {
+      const m = findMessage(tempId);
+      if (m){ m.status = "failed"; renderMessages(); }
+    });
+  }
+
+  function retryMessage(id){
+    const m = findMessage(id);
+    if (!m) return;
+    m.status = "sending";
+    renderMessages();
+    Backend.sendMessage(m.text, m.replyTo).then(() => {
+      setTimeout(() => { m.status = "delivered"; renderMessages(); }, 500);
+    }).catch(() => { m.status = "failed"; renderMessages(); });
+  }
+
+  /* ==========================================================================
+     EMOJI POPOVER (lightweight, no external dependency)
+  ========================================================================== */
+  const EMOJI = ["😀","😂","🙂","😉","😍","🤔","😅","😢","😮","😎","👍","🙏","🎉","🔥","❤️","✨","👏","😴","😇","🤝","🙌","😬","😱","🥲","🤗","😌","🫡","💯"];
+  function buildEmojiPop(){
+    els.emojiPop.innerHTML = EMOJI.map(e => `<button type="button" data-emoji="${e}">${e}</button>`).join("");
+  }
+
+  /* ==========================================================================
+     MODAL (block / report / delete confirmations)
+  ========================================================================== */
+  let modalConfirmHandler = null;
+  function openModal({ title, body, confirmLabel = "Confirm", onConfirm }){
+    els.modalTitle.textContent = title;
+    els.modalBody.textContent = body;
+    els.modalConfirm.textContent = confirmLabel;
+    modalConfirmHandler = onConfirm;
+    els.modalScrim.classList.add("open");
+  }
+  function closeModal(){ els.modalScrim.classList.remove("open"); modalConfirmHandler = null; }
+
+  /* ==========================================================================
+     EVENT WIRING
+  ========================================================================== */
+  els.composerForm.addEventListener("submit", e => { e.preventDefault(); sendCurrentMessage(); });
+
+  els.input.addEventListener("input", () => { autoGrow(); updateSendState(); });
+  els.input.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey){
+      e.preventDefault();
+      sendCurrentMessage();
+    }
+  });
+
+  els.replyCloseBtn.addEventListener("click", () => setReply(null));
+
+  els.emojiBtn.addEventListener("click", () => {
+    els.emojiPop.classList.toggle("open");
+  });
+  els.emojiPop.addEventListener("click", e => {
+    const btn = e.target.closest("button[data-emoji]");
+    if (!btn) return;
+    els.input.value += btn.dataset.emoji;
+    updateSendState();
+    autoGrow();
+  });
+
+  els.menuBtn.addEventListener("click", () => {
+    const open = els.menuDropdown.classList.toggle("open");
+    els.menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+
+  document.addEventListener("click", e => {
+    if (!e.target.closest(".menu-wrap")) els.menuDropdown.classList.remove("open");
+    if (!e.target.closest(".composer-wrap")) els.emojiPop.classList.remove("open");
+    if (!e.target.closest(".bubble-wrap") && state.openActionMenuId){
+      state.openActionMenuId = null;
+      document.querySelectorAll(".action-menu.open").forEach(m => m.classList.remove("open"));
+    }
+  });
+
+  // Message list: tap bubble to toggle its action menu; delegate action clicks
+  els.messages.addEventListener("click", e => {
+    const retryEl = e.target.closest("[data-retry]");
+    if (retryEl){ retryMessage(retryEl.dataset.retry); return; }
+
+    const actionBtn = e.target.closest(".action-menu button[data-act]");
+    if (actionBtn){
+      const row = actionBtn.closest(".row");
+      const id = row.dataset.id;
+      const msg = findMessage(id);
+      const act = actionBtn.dataset.act;
+
+      if (act === "copy"){
+        navigator.clipboard?.writeText(msg.text).catch(()=>{});
+        showToast("Message copied", ICON_CHECK);
+      } else if (act === "reply"){
+        setReply(msg);
+      } else if (act === "delete"){
+        openModal({
+          title: "Delete this message?",
+          body: "This only removes it from your view in this conversation.",
+          confirmLabel: "Delete",
+          onConfirm: () => {
+            Backend.deleteMessage(id);
+            state.messages = state.messages.filter(m => m.id !== id);
+            renderMessages();
+            showToast("Message deleted");
+          }
+        });
+      } else if (act === "report"){
+        openModal({
+          title: "Report this message?",
+          body: "Our team will review it. The other person won't be notified that you reported them.",
+          confirmLabel: "Report",
+          onConfirm: () => {
+            Backend.reportUser("message:" + id);
+            showToast("Message reported");
+          }
+        });
+      }
+      state.openActionMenuId = null;
+      document.querySelectorAll(".action-menu.open").forEach(m => m.classList.remove("open"));
+      return;
+    }
+
+    const bubble = e.target.closest("[data-toggle-actions]");
+    if (bubble){
+      const id = bubble.dataset.toggleActions;
+      const alreadyOpen = state.openActionMenuId === id;
+      document.querySelectorAll(".action-menu.open").forEach(m => m.classList.remove("open"));
+      state.openActionMenuId = alreadyOpen ? null : id;
+      if (!alreadyOpen){
+        const menu = els.messages.querySelector(`.action-menu[data-menu-for="${id}"]`);
+        if (menu) menu.classList.add("open");
+      }
+    }
+  });
+
+  els.messages.addEventListener("scroll", () => {
+    state.userScrolledUp = !isNearBottom(els.messages);
+    if (!state.userScrolledUp) els.newMsgPill.classList.remove("show");
+  });
+  els.newMsgPill.addEventListener("click", () => scrollToBottom(true));
+
+  els.reportBtn.addEventListener("click", () => {
+    els.menuDropdown.classList.remove("open");
+    openModal({
+      title: `Report ${Backend.peer.displayName}?`,
+      body: "Tell us what's wrong. Reports are reviewed by our safety team and kept confidential.",
+      confirmLabel: "Report user",
+      onConfirm: () => { Backend.reportUser("user"); showToast("User reported. Thanks for keeping ZenQ safe."); }
+    });
+  });
+
+  els.blockBtn.addEventListener("click", () => {
+    els.menuDropdown.classList.remove("open");
+    openModal({
+      title: `Block ${Backend.peer.displayName}?`,
+      body: "You won't see messages from them again, and this chat will be hidden from your inbox.",
+      confirmLabel: "Block user",
+      onConfirm: () => { Backend.blockUser(); showToast("User blocked"); }
+    });
+  });
+
+  els.clearChatBtn.addEventListener("click", () => {
+    els.menuDropdown.classList.remove("open");
+    openModal({
+      title: "Clear this chat?",
+      body: "This clears messages from your view only. It can't be undone.",
+      confirmLabel: "Clear",
+      onConfirm: () => { state.messages = []; renderMessages(); showToast("Chat cleared"); }
+    });
+  });
+
+  els.modalCancel.addEventListener("click", closeModal);
+  els.modalScrim.addEventListener("click", e => { if (e.target === els.modalScrim) closeModal(); });
+  els.modalConfirm.addEventListener("click", () => {
+    if (modalConfirmHandler) modalConfirmHandler();
+    closeModal();
+  });
+
+  // HOOK: wire to your router / navigation stack
+  els.backBtn.addEventListener("click", () => {
+    showToast("Back — hook this up to your navigation");
+  });
+
+  window.addEventListener("online", () => {
+    state.online = true;
+    els.offlineBanner.classList.remove("show");
+    state.messages.filter(m => m.status === "failed").forEach(m => retryMessage(m.id));
+  });
+  window.addEventListener("offline", () => {
+    state.online = false;
+    els.offlineBanner.classList.add("show");
+  });
+
+  els.signOutBtn?.addEventListener("click", () => {
+    els.menuDropdown.classList.remove("open");
+    window.ZenQChatAuth?.signOutUser();
+  });
+
+  /* ==========================================================================
+     CHAT BOOT SEQUENCE (demo message timing — remove when wiring real
+     Firestore listeners). This only ever runs once, after a real Firebase
+     user has been confirmed by startChatForUser() below — never on a guest
+     or before auth resolves.
+  ========================================================================== */
+  let chatBooted = false;
+  function bootChatUI(){
+    if (chatBooted) return;
+    chatBooted = true;
+
+    buildEmojiPop();
+    renderPeer();
+    renderSkeleton();
+
+    setTimeout(() => {
+      state.loading = false;
+      state.messages = Backend.seedMessages();
+      renderMessages();
+      scrollToBottom(false);
+    }, 700);
+
+    // Demo: simulate the peer typing, then sending a reply — remove with real listener wiring
+    setTimeout(() => {
+      Backend.peer.typing = true;
+      renderPeer();
+      renderMessages();
+    }, 2600);
+    setTimeout(() => {
+      Backend.peer.typing = false;
+      const incoming = { id:"m_incoming_"+Date.now(), from:"peer", text:"There's a shared doc — I'll pin the link here in a sec.", ts: Date.now(), status:"read" };
+      state.messages.push(incoming);
+      renderPeer();
+      const wasNearBottom = isNearBottom(els.messages, 120);
+      appendAndScroll(wasNearBottom);
+    }, 4200);
+  }
+
+  /* ==========================================================================
+     AUTH GATE — wiring against window.ZenQChatAuth (Firebase module below)
+     --------------------------------------------------------------------------
+     This is the ONLY place a chat session gets created. `user` here is a
+     real firebase.User — uid, displayName, email, phoneNumber all come
+     straight from Firebase, never generated locally.
+  ========================================================================== */
+  const authGate       = document.getElementById("authGate");
+  const authChecking    = document.getElementById("authCheckingView");
+  const authFormView    = document.getElementById("authFormView");
+  const authGoogleBtn   = document.getElementById("authGoogleBtn");
+  const authGoogleLabel = document.getElementById("authGoogleLabel");
+  const authEmailInput  = document.getElementById("authEmail");
+  const authPasswordInput = document.getElementById("authPassword");
+  const authErrorEl     = document.getElementById("authError");
+  const authSubmitBtn   = document.getElementById("authSubmitBtn");
+  const authToggleModeBtn = document.getElementById("authToggleModeBtn");
+  const authPhoneToggleBtn = document.getElementById("authPhoneToggleBtn");
+  const authPhoneBlock  = document.getElementById("authPhoneBlock");
+  const authPhoneNumber = document.getElementById("authPhoneNumber");
+  const authSendCodeBtn = document.getElementById("authSendCodeBtn");
+  const authCodeField   = document.getElementById("authCodeField");
+  const authPhoneCode   = document.getElementById("authPhoneCode");
+  const authVerifyCodeBtn = document.getElementById("authVerifyCodeBtn");
+
+  let authMode = "login"; // "login" | "signup"
+
+  function showAuthError(msg){
+    authErrorEl.textContent = msg;
+    authErrorEl.classList.add("show");
+  }
+  function clearAuthError(){
+    authErrorEl.textContent = "";
+    authErrorEl.classList.remove("show");
+  }
+
+  authToggleModeBtn.addEventListener("click", () => {
+    authMode = authMode === "login" ? "signup" : "login";
+    authSubmitBtn.textContent = authMode === "login" ? "Log in" : "Create account";
+    authToggleModeBtn.textContent = authMode === "login" ? "Don't have an account? Sign up" : "Already have an account? Log in";
+    clearAuthError();
+  });
+
+  authPhoneToggleBtn.addEventListener("click", () => {
+    const show = authPhoneBlock.style.display === "none";
+    authPhoneBlock.style.display = show ? "block" : "none";
+    authPhoneToggleBtn.textContent = show ? "Use email instead" : "Use phone number instead";
+  });
+
+  authGoogleBtn.addEventListener("click", async () => {
+    clearAuthError();
+    authGoogleBtn.disabled = true;
+    authGoogleLabel.textContent = "Signing in…";
+    try {
+      const user = await window.ZenQChatAuth?.signInWithGoogle();
+      // If popups are blocked this falls back to a redirect and resolves
+      // via onAuthStateChanged after the page comes back — nothing to do here.
+      if (!user) return;
+    } catch (err) {
+      if (!window.ZenQChatAuth?.isBenignAuthCancel?.(err)) {
+        showAuthError(window.ZenQChatAuth?.friendlyAuthError(err) || "Sign-in failed. Please try again.");
+      }
+    } finally {
+      authGoogleBtn.disabled = false;
+      authGoogleLabel.textContent = "Continue with Google";
+    }
+  });
+
+  authSubmitBtn.addEventListener("click", async () => {
+    clearAuthError();
+    const email = authEmailInput.value.trim();
+    const password = authPasswordInput.value;
+    if (!email || !password) { showAuthError("Enter your email and password."); return; }
+    authSubmitBtn.disabled = true;
+    authSubmitBtn.textContent = authMode === "login" ? "Logging in…" : "Creating account…";
+    try {
+      if (authMode === "login") await window.ZenQChatAuth?.signInWithEmail(email, password);
+      else await window.ZenQChatAuth?.signUpWithEmail(email, password);
+      // Success is picked up by onAuthStateChanged -> handleAuthStateChange.
+    } catch (err) {
+      showAuthError(window.ZenQChatAuth?.friendlyAuthError(err) || "Sign-in failed. Please try again.");
+    } finally {
+      authSubmitBtn.disabled = false;
+      authSubmitBtn.textContent = authMode === "login" ? "Log in" : "Create account";
+    }
+  });
+
+  authSendCodeBtn.addEventListener("click", async () => {
+    clearAuthError();
+    const phone = authPhoneNumber.value.trim();
+    if (!phone) { showAuthError("Enter a phone number, including country code."); return; }
+    authSendCodeBtn.disabled = true;
+    authSendCodeBtn.textContent = "Sending…";
+    try {
+      await window.ZenQChatAuth?.startPhoneSignIn(phone, "authRecaptchaContainer");
+      authCodeField.style.display = "block";
+      authVerifyCodeBtn.style.display = "block";
+      showToast("Code sent");
+    } catch (err) {
+      showAuthError(window.ZenQChatAuth?.friendlyAuthError(err) || "Couldn't send code. Please try again.");
+    } finally {
+      authSendCodeBtn.disabled = false;
+      authSendCodeBtn.textContent = "Send code";
+    }
+  });
+
+  authVerifyCodeBtn.addEventListener("click", async () => {
+    clearAuthError();
+    const code = authPhoneCode.value.trim();
+    if (!code) { showAuthError("Enter the code you received by SMS."); return; }
+    authVerifyCodeBtn.disabled = true;
+    authVerifyCodeBtn.textContent = "Verifying…";
+    try {
+      await window.ZenQChatAuth?.confirmPhoneCode(code);
+    } catch (err) {
+      showAuthError(window.ZenQChatAuth?.friendlyAuthError(err) || "That code isn't correct.");
+    } finally {
+      authVerifyCodeBtn.disabled = false;
+      authVerifyCodeBtn.textContent = "Verify & continue";
+    }
+  });
+
+  // Called by the Firebase module below on every auth-state change,
+  // including once on load with whatever session Firebase already has
+  // persisted. This is the single seam that turns a real Firebase account
+  // into Backend.currentUser — nothing else in this file may set it.
+  window.handleChatAuthStateChange = function handleChatAuthStateChange(user){
+    authChecking.style.display = "none";
+    if (!user) {
+      // No session (or the user signed out): lock the chat behind the gate.
+      // There is no fallback guest identity — Backend.currentUser stays null.
+      Backend.currentUser = null;
+      chatBooted = false;
+      authGate.classList.remove("hidden");
+      authFormView.style.display = "block";
+      document.getElementById("chatContainer").classList.add("hidden");
+      return;
+    }
+    // Real, verified Firebase account — this is the chat user's identity.
+    Backend.currentUser = {
+      id: user.uid,
+      displayName: user.displayName || (user.email ? user.email.split("@")[0] : null) || (user.phoneNumber || "Signed-in user"),
+      email: user.email || null,
+      photoURL: user.photoURL || null,
+    };
+    authGate.classList.add("hidden");
+    document.getElementById("chatContainer").classList.remove("hidden");
+    bootChatUI();
+  };
+
+})();
+</script>
+
+<script type="module">
+// ============================================================
+// ZenQ AI Chat — Firebase Authentication (merged from the main ZenQ app)
+// ============================================================
+// This is the ONLY source of chat identity in this file. It reuses the same
+// Firebase project as the main ZenQ AI app so a person's chat account is the
+// same account they use everywhere else — sign in once, chat everywhere.
+// There is no anonymous/guest sign-in method wired up here on purpose: only
+// Google, Email/Password, and Phone produce a real, persistent Firebase uid.
+//
+// Setup is identical to the main app: see console.firebase.google.com,
+// enable Google / Email-Password / Phone under Authentication → Sign-in
+// method, and add this file's domain under Authorized domains.
+// ============================================================
+
+import {
+  initializeApp,
+} from 'https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js';
+import {
+  getAuth, setPersistence, browserLocalPersistence, onAuthStateChanged, signOut,
+  GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
+  signInWithEmailAndPassword, createUserWithEmailAndPassword,
+  RecaptchaVerifier, signInWithPhoneNumber,
+} from 'https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js';
+
+const firebaseConfig = {
+  apiKey: 'AIzaSyBXxCJj5_7r1vtwcVLzC-D4lO8FGQeb2wo',
+  authDomain: 'media-valut.firebaseapp.com',
+  projectId: 'media-valut',
+  storageBucket: 'media-valut.firebasestorage.app',
+  messagingSenderId: '557507436256',
+  appId: '1:557507436256:web:6a7c1e7df94a5706e97a85',
+};
+const isConfigured = Object.values(firebaseConfig).every(v => typeof v === 'string' && !v.startsWith('YOUR_'));
+if (!isConfigured) {
+  console.warn('[ZenQ Chat] Firebase auth is not configured yet — add your project\'s config to firebaseConfig near the end of this file.');
+}
+
+let app = null, auth = null;
+try {
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+} catch (err) {
+  console.error('[ZenQ Chat] Firebase failed to initialize:', err);
+}
+
+let resolveReady;
+const authReady = new Promise(res => { resolveReady = res; });
+if (auth) setPersistence(auth, browserLocalPersistence).finally(resolveReady);
+else resolveReady();
+
+function assertReady() {
+  if (!isConfigured || !auth) {
+    const e = new Error("Firebase isn't configured yet — add your project's config in the script near the end of this file.");
+    e.code = 'app/not-configured';
+    throw e;
+  }
+}
+
+const ERROR_MESSAGES = {
+  'auth/invalid-credential': 'Incorrect email or password.',
+  'auth/user-not-found': 'Incorrect email or password.',
+  'auth/wrong-password': 'Incorrect email or password.',
+  'auth/invalid-email': "That email address doesn't look valid.",
+  'auth/user-disabled': 'This account has been disabled.',
+  'auth/email-already-in-use': 'An account already exists with this email.',
+  'auth/weak-password': 'Password should be at least 6 characters.',
+  'auth/missing-password': 'Enter your password.',
+  'auth/too-many-requests': 'Too many attempts — please wait a moment and try again.',
+  'auth/network-request-failed': 'Network error — check your connection and try again.',
+  'auth/popup-blocked': 'Your browser blocked the sign-in popup. Please allow popups and try again.',
+  'auth/popup-closed-by-user': 'Sign-in was cancelled.',
+  'auth/cancelled-popup-request': 'Sign-in was cancelled.',
+  'auth/account-exists-with-different-credential': 'An account already exists with this email using a different sign-in method.',
+  'auth/invalid-phone-number': "That phone number doesn't look valid. Include your country code, e.g. +1 555 555 5555.",
+  'auth/missing-phone-number': 'Enter a phone number.',
+  'auth/invalid-verification-code': "That code isn't correct. Check the SMS and try again.",
+  'auth/code-expired': 'That code has expired — send a new one.',
+  'auth/captcha-check-failed': 'reCAPTCHA verification failed. Please try again.',
+  'auth/quota-exceeded': 'SMS limit reached for this app. Please try again later.',
+  'auth/operation-not-allowed': 'This sign-in method is not enabled for this app yet.',
+  'auth/unauthorized-domain': "This domain isn't authorized for sign-in yet.",
+};
+function friendlyAuthError(error) {
+  const code = error && error.code;
+  if (code === 'app/not-configured') return error.message;
+  if (code && ERROR_MESSAGES[code]) return ERROR_MESSAGES[code];
+  return 'Login attempt failed. Please try again.';
+}
+function isBenignAuthCancel(error) {
+  const code = error && error.code;
+  return code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request';
+}
+
+async function signInWithGoogle() {
+  assertReady();
+  await authReady;
+  const provider = new GoogleAuthProvider();
+  try {
+    const cred = await signInWithPopup(auth, provider);
+    return cred.user;
+  } catch (err) {
+    if (err && (err.code === 'auth/popup-blocked' || err.code === 'auth/operation-not-supported-in-this-environment')) {
+      await signInWithRedirect(auth, provider);
+      return null;
+    }
+    throw err;
+  }
+}
+
+async function signInWithEmail(email, password) {
+  assertReady();
+  await authReady;
+  const cred = await signInWithEmailAndPassword(auth, email, password);
+  return cred.user;
+}
+async function signUpWithEmail(email, password) {
+  assertReady();
+  await authReady;
+  const cred = await createUserWithEmailAndPassword(auth, email, password);
+  return cred.user;
+}
+
+let recaptchaVerifier = null;
+let pendingConfirmation = null;
+
+function getRecaptchaVerifier(containerId) {
+  if (!recaptchaVerifier) {
+    recaptchaVerifier = new RecaptchaVerifier(auth, containerId, { size: 'invisible' });
+  }
+  return recaptchaVerifier;
+}
+function resetRecaptcha() {
+  if (recaptchaVerifier) {
+    try { recaptchaVerifier.clear(); } catch { /* best effort */ }
+    recaptchaVerifier = null;
+  }
+}
+async function startPhoneSignIn(phoneNumber, containerId) {
+  assertReady();
+  await authReady;
+  resetRecaptcha();
+  const verifier = getRecaptchaVerifier(containerId);
+  try {
+    pendingConfirmation = await signInWithPhoneNumber(auth, phoneNumber, verifier);
+  } catch (err) {
+    resetRecaptcha();
+    throw err;
+  }
+}
+async function confirmPhoneCode(code) {
+  if (!pendingConfirmation) {
+    const e = new Error('That code has expired — send a new one.');
+    e.code = 'auth/code-expired';
+    throw e;
+  }
+  const cred = await pendingConfirmation.confirm(code);
+  pendingConfirmation = null;
+  return cred.user;
+}
+
+async function signOutUser() {
+  if (!auth) return;
+  await signOut(auth);
+}
+
+async function getIdToken() {
+  if (!auth) return null;
+  await authReady;
+  const user = auth.currentUser;
+  if (!user) return null;
+  try {
+    return await user.getIdToken();
+  } catch (err) {
+    console.error('[ZenQ Chat] Failed to get ID token:', err);
+    return null;
+  }
+}
+
+if (auth) {
+  // Fires once on load with whatever session is already persisted, then
+  // again on every sign-in/sign-out. This is the ONLY place chat identity
+  // gets decided — see handleChatAuthStateChange() in the classic script.
+  onAuthStateChanged(auth, (user) => {
+    try { window.handleChatAuthStateChange?.(user); }
+    catch (err) { console.error('[ZenQ Chat] handleChatAuthStateChange failed:', err); }
+  });
+  getRedirectResult(auth).catch((err) => {
+    console.error('[ZenQ Chat] Redirect sign-in failed:', err);
+  });
+} else {
+  // Firebase never initialized — fail closed, not open. No config means
+  // no way to verify anyone, so nobody gets into the chat.
+  window.handleChatAuthStateChange?.(null);
+}
+
+window.ZenQChatAuth = {
+  ready: authReady,
+  signInWithGoogle,
+  signInWithEmail,
+  signUpWithEmail,
+  startPhoneSignIn,
+  confirmPhoneCode,
+  signOutUser,
+  friendlyAuthError,
+  isBenignAuthCancel,
+  getIdToken,
+};
+</script>
+</body>
+</html>
