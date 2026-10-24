@@ -1,3 +1,4 @@
+.gitignore
 # Gradle files
 .gradle/
 build/
@@ -32,3 +33,8 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Node.js backend	node_modules/
+.env
+.env.*
+uploads/
